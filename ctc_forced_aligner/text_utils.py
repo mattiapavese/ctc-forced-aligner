@@ -6,6 +6,7 @@ import numpy as np
 from uroman import Uroman
 
 from .norm_config import norm_config
+from .alignment_utils import SAMPLING_FREQ
 
 uroman_instance = Uroman()
 
@@ -224,31 +225,44 @@ def merge_segments(segments, threshold=0.00):
         if segments[i + 1]["start"] - segments[i]["end"] < threshold:
             segments[i + 1]["start"] = segments[i]["end"]
 
+TOTAL_STRIDE=320
 
 def postprocess_results(
     text_starred: list,
     spans: list,
-    stride: float,
     scores: np.ndarray,
+    stride: float|None=None,
     merge_threshold: float = 0.0,
 ):
-    results = []
+    results = []   
 
     for i, t in enumerate(text_starred):
+        
         if t == "<star>":
             continue
-        span = spans[i]
+
+        span = spans[i] 
         seg_start_idx = span[0].start
         seg_end_idx = span[-1].end
 
-        audio_start_sec = seg_start_idx * (stride) / 1000
-        audio_end_sec = seg_end_idx * (stride) / 1000
-        score = scores[seg_start_idx:seg_end_idx].sum()
+        if stride is None:
+            stride=TOTAL_STRIDE
+
+        audio_start_sec = seg_start_idx * (stride/ SAMPLING_FREQ)
+        audio_end_sec = (seg_end_idx + 1) * (stride/ SAMPLING_FREQ)
+
+        if all(seg.label in {"<star>", "<blank>"} for seg in span):
+            score = -np.inf
+        elif seg_start_idx==seg_end_idx:
+            score=scores[seg_start_idx].item()
+        else:
+            score = scores[seg_start_idx:seg_end_idx].sum().item()
+
         sample = {
             "start": audio_start_sec,
             "end": audio_end_sec,
             "text": t,
-            "score": score.item(),
+            "score": np.exp(score),
         }
         results.append(sample)
 

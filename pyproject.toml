@@ -19,7 +19,7 @@ dependencies = {file = ["requirements.txt"]}
 dev = ["black==23.*", "flake8==7.*", "flake8-pyproject==1.*", "isort==5.*", "pytest==7.*"]
 
 [project.urls]
-repository = "https://github.com/MahmoudAshraf97/ctc-forced-aligner"
+repository = "https://github.com/mattiapavese/ctc-forced-aligner"
 
 [project.scripts]
 ctc-forced-aligner = "ctc_forced_aligner.align:cli"

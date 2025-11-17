@@ -8,7 +8,7 @@ import torch
 import torchaudio
 
 from packaging import version
-from transformers import AutoModelForCTC, AutoTokenizer
+from transformers import AutoModelForCTC, AutoTokenizer, Wav2Vec2ForCTC
 from transformers import __version__ as transformers_version
 from transformers.utils import is_flash_attn_2_available
 
@@ -257,7 +257,7 @@ def get_alignments(
 
 def load_alignment_model(
     device: str,
-    model_path: str = "MahmoudAshraf/mms-300m-1130-forced-aligner",
+    model_path: str,
     attn_implementation: str = None,
     dtype: torch.dtype = torch.float32,
 ):
@@ -285,3 +285,76 @@ def load_alignment_model(
     tokenizer = AutoTokenizer.from_pretrained(model_path)
 
     return model, tokenizer
+
+# new methods to perform batched inference on actual different clips
+def pad_last_and_stack(tensors:list[torch.Tensor], pad_value=0., min_seq_len=400)->torch.Tensor:
+    """
+    Pads a list of N-dimensional tensors along the last dimension to a common length and stacks them into a single tensor.
+
+    The function finds the maximum sequence length among all input tensors, 
+    ensuring it is at least `min_seq_len`. Each tensor is then right-padded 
+    (on the last dimension) with `pad_value` up to this length, and all 
+    tensors are stacked along a new first dimension.
+
+    Args:
+        tensors (list[torch.Tensor]): 
+            List of N-dimensional tensors to pad and stack. All tensors must have 
+            the same shape except for the last dimension.
+        pad_value (float, optional): 
+            Value to use for padding. Defaults to 0.0.
+        min_seq_len (int, optional): 
+            Minimum sequence length to pad to, even if all input tensors are shorter. Defaults to 400.
+
+    Returns:
+        torch.Tensor: 
+            A tensor of shape `(N, ..., L)` where `N` is the number of input tensors 
+            and `L` is `max(max_seq_len, min_seq_len)`.
+
+    Example:
+        >>> a = torch.tensor([1, 2, 3])
+        >>> b = torch.tensor([4, 5])
+        >>> pad_and_stack([a, b], pad_value=-1, min_seq_len=4)
+        tensor([[ 1,  2,  3, -1],
+                [ 4,  5, -1, -1]])
+    """
+    max_=max(max(t.shape[-1] for t in tensors), min_seq_len)
+    return torch.stack(
+        [torch.nn.functional.pad(t, (0,max_-t.shape[-1]), value=pad_value) for t in tensors],
+        dim=0
+    )
+
+REC_FIELD=400 # receptive field of w2v models
+STRIDE=320 # total stride of w2v models
+def get_expected_num_frames(wav:torch.Tensor) -> int:
+    return int( (wav.size(-1)-REC_FIELD)/STRIDE + 1 )
+
+def generate_emissions_batch(
+    model: Wav2Vec2ForCTC, tensors:list[torch.Tensor]|torch.Tensor, batch_size:int
+) -> tuple[list[torch.Tensor], list[int]]:
+    
+    # TODO check to handle 2d tensors also
+
+    if isinstance(tensors, torch.Tensor):
+        tensors=[tensors]
+   
+    emissions=[]
+    for i in range(0,len(tensors),batch_size):
+        batch=tensors[i:i+batch_size]
+        # after padding, the number of frames may be bigger
+        # so we'll cut the excess frames
+        expected_frames_per_el=[get_expected_num_frames(b) for b in batch]
+
+        input=pad_last_and_stack(batch).to(model.device)
+        with torch.inference_mode():
+            emission:torch.Tensor=model(input).logits
+
+        emission = torch.log_softmax(emission, dim=-1)
+        bs, num_frames = emission.size(0), emission.size(1)
+        emission = torch.cat(
+            [emission, torch.zeros(bs, num_frames, 1).to(emission.device)], dim=-1
+        )  # adding a star token dimension
+
+        for e, expected_frames in zip(emission, expected_frames_per_el):
+            emissions.append(e[:expected_frames, :])
+    # strides is None
+    return emissions, None
