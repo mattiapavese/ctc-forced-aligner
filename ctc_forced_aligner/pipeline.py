@@ -16,7 +16,8 @@ def align_batch(
     audios:list[torch.Tensor]|torch.Tensor, 
     sr:int,
     texts:list[str]|str, 
-    batch_size:int=16, language:str|None=None
+    batch_size:int=16, language:str|None=None,
+    verbose:bool = False
 )->list[tuple[list[Word], bool]]:
     
     """Returns a list of tuples (list[Word], ok),
@@ -60,9 +61,12 @@ def align_batch(
             )
             
             word_timestamps_coll.append((word_timestamps, True))
+
         except Exception as err:
-            print(f"[ERROR] Failed to align '{text}': {err}\nAppending empty list[Word].")
-            print("...")
+            
+            if verbose :
+                print(f"Failed to align {text}: {err}")
+
             word_timestamps_coll.append(([], False))
     
     return word_timestamps_coll
