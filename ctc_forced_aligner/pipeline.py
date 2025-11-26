@@ -17,7 +17,11 @@ def align_batch(
     sr:int,
     texts:list[str]|str, 
     batch_size:int=16, language:str|None=None
-)->list[list[Word]]:
+)->list[tuple[list[Word], bool]]:
+    
+    """Returns a list of tuples (list[Word], ok),
+    where ok is a bool indicating whether the alignment process
+    terminated successfully for a particular entry or not."""
     
     if isinstance(audios, torch.Tensor):
         audios=[audios]
@@ -38,23 +42,27 @@ def align_batch(
     # by executing this in parallel
     # using multiprocessing
     for emission,text in zip(emissions, texts):
+        try:
+            tokens_starred, text_starred = preprocess_text(
+                text, romanize=True, language=language,
+            )
 
-        tokens_starred, text_starred = preprocess_text(
-            text, romanize=True, language=language,
-        )
+            segments, scores, blank_token = get_alignments(
+                emission, tokens_starred, tokenizer,
+            ) 
+            
+            spans = get_spans(
+                tokens_starred, segments, blank_token
+            )
 
-        segments, scores, blank_token = get_alignments(
-            emission, tokens_starred, tokenizer,
-        ) 
-        
-        spans = get_spans(
-            tokens_starred, segments, blank_token
-        )
-
-        word_timestamps:list[Word] = postprocess_results(
-            text_starred, spans, scores
-        )
-        
-        word_timestamps_coll.append(word_timestamps)
+            word_timestamps:list[Word] = postprocess_results(
+                text_starred, spans, scores
+            )
+            
+            word_timestamps_coll.append((word_timestamps, True))
+        except Exception as err:
+            print(f"[ERROR] Failed to align '{text}': {err}\nAppending empty list[Word].")
+            print("...")
+            word_timestamps_coll.append(([], False))
     
     return word_timestamps_coll
