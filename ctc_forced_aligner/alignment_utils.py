@@ -14,6 +14,8 @@ from transformers.utils import is_flash_attn_2_available
 
 from .ctc_forced_aligner import forced_align as forced_align_cpp
 
+import gc
+
 SAMPLING_FREQ = 16000
 
 
@@ -329,7 +331,7 @@ def get_expected_num_frames(wav:torch.Tensor) -> int:
     return int( (wav.size(-1)-REC_FIELD)/STRIDE + 1 )
 
 def generate_emissions_batch(
-    model: Wav2Vec2ForCTC, tensors:list[torch.Tensor]|torch.Tensor, batch_size:int
+    model: Wav2Vec2ForCTC, tensors:list[torch.Tensor]|torch.Tensor, batch_size:int, clean_cache:bool = True
 ) -> tuple[list[torch.Tensor], list[int]]:
     
     # TODO check to handle 2d tensors also
@@ -353,6 +355,14 @@ def generate_emissions_batch(
         emission = torch.cat(
             [emission, torch.zeros(bs, num_frames, 1).to(emission.device)], dim=-1
         )  # adding a star token dimension
+
+        if clean_cache and torch.cuda.is_available(): 
+            input = input.to("cpu")
+            emission = emission.to("cpu") 
+            del input
+            del emission
+            gc.collect()
+            torch.cuda.empty_cache()
 
         for e, expected_frames in zip(emission, expected_frames_per_el):
             emissions.append(e[:expected_frames, :])
