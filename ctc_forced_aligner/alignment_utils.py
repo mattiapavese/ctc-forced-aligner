@@ -356,6 +356,9 @@ def generate_emissions_batch(
             [emission, torch.zeros(bs, num_frames, 1).to(emission.device)], dim=-1
         )  # adding a star token dimension
 
+        for e, expected_frames in zip(emission, expected_frames_per_el):
+            emissions.append(e[:expected_frames, :])
+        
         if clean_cache and torch.cuda.is_available(): 
             input = input.to("cpu")
             emission = emission.to("cpu") 
@@ -363,8 +366,5 @@ def generate_emissions_batch(
             del emission
             gc.collect()
             torch.cuda.empty_cache()
-
-        for e, expected_frames in zip(emission, expected_frames_per_el):
-            emissions.append(e[:expected_frames, :])
     # strides is None
     return emissions, None
